@@ -1,69 +1,38 @@
 import discord
 from discord.ext import commands
 import os
-import asyncio
 from dotenv import load_dotenv
-
-# Flask para mantener el puerto abierto en Render
-from flask import Flask
-from threading import Thread
+import asyncio
 
 load_dotenv()
-
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-intents = discord.Intents.default()
-intents.message_content = True
+class MainBot(commands.Bot):
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+    def __init__(self):
+        intents = discord.Intents.default()
+        super().__init__(
+            command_prefix="!",
+            intents=intents
+        )
 
-# ---------------------------
-# SERVIDOR WEB (para Render)
-# ---------------------------
+    async def setup_hook(self):
 
-app = Flask(__name__)
+        # cargar cogs
+        await self.load_extension("stats")
+        await self.load_extension("trading")
+        await self.load_extension("limpieza")
 
-@app.route("/")
-def home():
-    return "Bot is running"
+        await self.tree.sync()
 
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# ---------------------------
-# CARGAR COGS
-# ---------------------------
-
-async def load_extensions():
-    for filename in os.listdir("./cogs"):
-        if filename.endswith(".py"):
-            await bot.load_extension(f"cogs.{filename[:-3]}")
-
-# ---------------------------
-# BOT READY
-# ---------------------------
-
-@bot.event
-async def on_ready():
-    print(f"✅ Bot conectado como {bot.user}")
-
-# ---------------------------
-# MAIN
-# ---------------------------
+        print("✅ Cogs cargados")
+    
+    async def on_ready(self):
+        print(f"🤖 Bot conectado como {self.user}")
 
 async def main():
+    bot = MainBot()
     async with bot:
-        await load_extensions()
         await bot.start(TOKEN)
-
-# iniciar servidor web
-keep_alive()
-
-# iniciar bot
 
 asyncio.run(main())
