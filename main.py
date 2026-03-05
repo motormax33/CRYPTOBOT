@@ -10,7 +10,7 @@ from threading import Thread
 
 load_dotenv()
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -65,4 +65,5 @@ async def main():
 keep_alive()
 
 # iniciar bot
+
 asyncio.run(main())
