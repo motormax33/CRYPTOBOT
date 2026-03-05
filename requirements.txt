@@ -4,3 +4,4 @@ python-dotenv
 pytz
 yfinance
 scipy
+flask
