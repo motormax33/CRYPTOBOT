@@ -22,6 +22,7 @@ class MainBot(commands.Bot):
         await self.load_extension("stats")
         await self.load_extension("trading")
         await self.load_extension("limpieza")
+        await self.load_extension("alertas")
 
         await self.tree.sync()
 
