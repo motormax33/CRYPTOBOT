@@ -1,36 +1,47 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import aiohttp
-import asyncio
 import os
 import time
 from scipy.signal import argrelextrema
 from dotenv import load_dotenv
 
-# ============================
-# CONFIGURACIÓN
-# ============================
 load_dotenv()
 
-# ============================
-# INDICADORES TÉCNICOS
-# ============================
+SIGNALS_CHANNEL_ID = int(os.getenv("SIGNS_CHANNEL_ID"))
+
+SCAN_SYMBOLS = [
+"BTC-USD",
+"ETH-USD",
+"SOL-USD",
+"BNB-USD",
+"XRP-USD",
+"ADA-USD",
+"LINK-USD",
+"AVAX-USD",
+"DOGE-USD",
+"MATIC-USD"
+]
+
+# =====================
+# INDICADORES
+# =====================
+
 def calcular_rsi(series, period=14):
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
     rs = gain / (loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
 
 def calcular_macd(series):
-    exp1 = series.ewm(span=12, adjust=False).mean()
-    exp2 = series.ewm(span=26, adjust=False).mean()
+    exp1 = series.ewm(span=12).mean()
+    exp2 = series.ewm(span=26).mean()
     macd = exp1 - exp2
-    signal = macd.ewm(span=9, adjust=False).mean()
+    signal = macd.ewm(span=9).mean()
     return macd, signal
 
 
@@ -38,16 +49,21 @@ def calcular_atr(df, period=14):
     high_low = df['High'] - df['Low']
     high_close = np.abs(df['High'] - df['Close'].shift())
     low_close = np.abs(df['Low'] - df['Close'].shift())
+
     ranges = pd.concat([high_low, high_close, low_close], axis=1)
     true_range = np.max(ranges, axis=1)
-    return true_range.rolling(14).mean().iloc[-1]
+
+    return true_range.rolling(period).mean().iloc[-1]
 
 
-# ============================
-# SOPORTES Y RESISTENCIAS
-# ============================
-def obtener_niveles_clave(df):
+# =====================
+# SOPORTE / RESISTENCIA
+# =====================
+
+def obtener_niveles(df):
+
     data = df['Close'].tail(50).values
+
     max_idx = argrelextrema(data, np.greater, order=10)[0]
     min_idx = argrelextrema(data, np.less, order=10)[0]
 
@@ -57,48 +73,22 @@ def obtener_niveles_clave(df):
     return float(soporte), float(resistencia)
 
 
-# ============================
-# DIVERGENCIAS
-# ============================
-def detectar_divergencias(df):
-    close = df['Close'].values
-    rsi = df['RSI'].values
-    picos = argrelextrema(close, np.greater, order=5)[0]
-    valles = argrelextrema(close, np.less, order=5)[0]
+# =====================
+# COG
+# =====================
 
-    if len(picos) >= 2:
-        p1, p2 = picos[-2], picos[-1]
-        if close[p2] > close[p1] and rsi[p2] < rsi[p1]:
-            return "🔴 BAJISTA"
-
-    if len(valles) >= 2:
-        v1, v2 = valles[-2], valles[-1]
-        if close[v2] < close[v1] and rsi[v2] > rsi[v1]:
-            return "🟢 ALCISTA"
-
-    return "Neutral"
-
-
-# ============================
-# COG PRINCIPAL
-# ============================
 class Trading(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
         self.cache = {}
-        self.session = None
 
-    async def cog_load(self):
-        self.session = aiohttp.ClientSession()
+        self.market_scanner.start()
 
-    async def cog_unload(self):
-        if self.session:
-            await self.session.close()
-
-    # ============================
+    # =====================
     # OBTENER DATOS
-    # ============================
+    # =====================
+
     def obtener_datos(self, symbol):
 
         if symbol in self.cache and (time.time() - self.cache[symbol]["time"] < 60):
@@ -113,31 +103,24 @@ class Trading(commands.Cog):
             df.columns = df.columns.get_level_values(0)
 
         df['RSI'] = calcular_rsi(df['Close'])
-        df['EMA200'] = df['Close'].ewm(span=200, adjust=False).mean()
+        df['EMA200'] = df['Close'].ewm(span=200).mean()
+
         df['MACD'], df['MACD_SIGNAL'] = calcular_macd(df['Close'])
 
-        last_row = df.iloc[-1]
-        prev_row = df.iloc[-2]
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
 
         atr = calcular_atr(df)
-        soporte, resistencia = obtener_niveles_clave(df)
-
-        estructura = "RANGO ↔️"
-
-        if last_row['High'] > prev_row['High'] and last_row['Low'] > prev_row['Low']:
-            estructura = "UPTREND 📈"
-        elif last_row['High'] < prev_row['High'] and last_row['Low'] < prev_row['Low']:
-            estructura = "DOWNTREND 📉"
+        soporte, resistencia = obtener_niveles(df)
 
         datos = {
-            "precio": float(last_row['Close']),
-            "rsi": float(last_row['RSI']),
-            "macd": float(last_row['MACD']),
-            "macd_sig": float(last_row['MACD_SIGNAL']),
-            "tendencia": "ALCISTA" if last_row['Close'] > last_row['EMA200'] else "BAJISTA",
-            "divergencia": detectar_divergencias(df.dropna()),
-            "estructura": estructura,
-            "volumen": "ALTO" if last_row['Volume'] > df['Volume'].rolling(20).mean().iloc[-1] else "NORMAL",
+            "precio": float(last['Close']),
+            "rsi": float(last['RSI']),
+            "macd": float(last['MACD']),
+            "macd_sig": float(last['MACD_SIGNAL']),
+            "tendencia": "ALCISTA" if last['Close'] > last['EMA200'] else "BAJISTA",
+            "volumen": float(last['Volume']),
+            "vol_avg": float(df['Volume'].rolling(20).mean().iloc[-1]),
             "atr": atr,
             "soporte": soporte,
             "resistencia": resistencia
@@ -147,113 +130,150 @@ class Trading(commands.Cog):
 
         return datos
 
-    # ============================
-    # IA EXPLICACIÓN
-    # ============================
-    async def ia_explicacion(self, datos, decision):
 
-        prompt = (
-            f"Actúa como un trader senior. Analiza estos datos:\n"
-            f"- Precio: {datos['precio']}\n"
-            f"- RSI: {datos['rsi']:.2f}\n"
-            f"- Tendencia: {datos['tendencia']}\n"
-            f"- Estructura: {datos['estructura']}\n"
-            f"- Soporte: {datos['soporte']} | Resistencia: {datos['resistencia']}\n"
-            f"Decisión: {decision}.\n\n"
-            f"Tarea: Explica brevemente por qué {decision} en español profesional (max 25 palabras)."
+    # =====================
+    # SCORE AVANZADO
+    # =====================
+
+    def calcular_score(self, datos):
+
+        score = 0
+
+        # tendencia
+        score += 2 if datos["tendencia"] == "ALCISTA" else -2
+
+        # RSI
+        if datos["rsi"] < 35:
+            score += 1
+        elif datos["rsi"] > 65:
+            score -= 1
+
+        # MACD
+        score += 1 if datos["macd"] > datos["macd_sig"] else -1
+
+        # ruptura resistencia
+        if datos["precio"] > datos["resistencia"]:
+            score += 3
+
+        # volumen fuerte
+        vol_ratio = datos["volumen"] / (datos["vol_avg"] + 1)
+
+        if vol_ratio > 2:
+            score += 1
+
+        return score
+
+
+    # =====================
+    # GENERAR EMBED
+    # =====================
+
+    def crear_embed(self, symbol, datos, score):
+
+        decision = "🟢 COMPRAR" if score >= 3 else "🔴 VENDER" if score <= -3 else "🟡 ESPERAR"
+
+        precio = datos["precio"]
+
+        sl = precio - datos["atr"] * 2 if decision == "🟢 COMPRAR" else precio + datos["atr"] * 2
+        tp = precio + datos["atr"] * 3 if decision == "🟢 COMPRAR" else precio - datos["atr"] * 3
+
+        rr = abs((tp - precio) / (precio - sl)) if (precio - sl) != 0 else 0
+
+        color = 0x2ecc71 if "COMPRAR" in decision else 0xe74c3c if "VENDER" in decision else 0xf1c40f
+
+        embed = discord.Embed(
+            title=f"📊 Señal de Trading: {symbol}",
+            color=color
         )
 
-        try:
-            async with self.session.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "llama3",
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.2}
-                },
-                timeout=10
-            ) as r:
+        embed.add_field(name="🎯 Acción", value=decision, inline=True)
+        embed.add_field(name="📊 Score", value=f"{score}", inline=True)
+        embed.add_field(name="💰 Precio", value=f"${precio:,.2f}", inline=True)
 
-                res = await r.json()
+        embed.add_field(name="📉 Soporte", value=f"${datos['soporte']:,.2f}", inline=True)
+        embed.add_field(name="📈 Resistencia", value=f"${datos['resistencia']:,.2f}", inline=True)
+        embed.add_field(name="📏 ATR", value=f"{datos['atr']:.4f}", inline=True)
 
-                return res.get("response", "Explicación no disponible.")
+        if decision != "🟡 ESPERAR":
+            embed.add_field(name="🛡️ Stop Loss", value=f"${sl:,.2f}", inline=True)
+            embed.add_field(name="🚀 Take Profit", value=f"${tp:,.2f}", inline=True)
+            embed.add_field(name="⚖️ Risk/Reward", value=f"{rr:.2f}", inline=True)
 
-        except:
-            return "IA fuera de línea. Análisis técnico basado en score cuantitativo."
+        return embed
 
-    # ============================
-    # COMANDO DISCORD
-    # ============================
-    @discord.app_commands.command(name="analisis", description="Análisis técnico avanzado con IA")
-    async def analisis(self, interaction: discord.Interaction, activo: str):
 
-        await interaction.response.defer(thinking=True)
+    # =====================
+    # SCANNER AUTOMÁTICO
+    # =====================
 
-        symbol = activo.upper()
+    @tasks.loop(minutes=15)
+    async def market_scanner(self):
 
-        if "-" not in symbol and len(symbol) <= 5:
-            symbol += "-USD"
+        canal = self.bot.get_channel(SIGNALS_CHANNEL_ID)
 
-        try:
+        if not canal:
+            return
+
+        oportunidades = []
+
+        for symbol in SCAN_SYMBOLS:
 
             datos = self.obtener_datos(symbol)
 
             if not datos:
-                return await interaction.followup.send(
-                    "⚠️ Error: Activo no encontrado o datos insuficientes."
-                )
+                continue
 
-            score = 0
-            score += 1 if datos["tendencia"] == "ALCISTA" else -1
-            score += 1 if datos["rsi"] < 35 else (-1 if datos["rsi"] > 65 else 0)
-            score += 1 if datos["macd"] > datos["macd_sig"] else -1
-            score += 2 if "ALCISTA" in datos["divergencia"] else (-2 if "BAJISTA" in datos["divergencia"] else 0)
+            score = self.calcular_score(datos)
 
-            decision = "🟢 COMPRAR" if score >= 3 else "🔴 VENDER" if score <= -3 else "🟡 ESPERAR"
+            oportunidades.append((symbol, score, datos))
 
-            color = 0x2ecc71 if "COMPRAR" in decision else 0xe74c3c if "VENDER" in decision else 0xf1c40f
+            if score >= 5:
+                embed = self.crear_embed(symbol, datos, score)
+                await canal.send(embed=embed)
 
-            sl = datos['precio'] - (datos['atr'] * 2) if "COMPRAR" in decision else datos['precio'] + (datos['atr'] * 2)
-            tp = datos['precio'] + (datos['atr'] * 3) if "COMPRAR" in decision else datos['precio'] - (datos['atr'] * 3)
+        # ranking
 
-            explicacion = await self.ia_explicacion(datos, decision)
+        oportunidades.sort(key=lambda x: x[1], reverse=True)
 
-            embed = discord.Embed(
-                title=f"🏛️ Terminal de Trading: {symbol}",
-                color=color,
-                timestamp=discord.utils.utcnow()
-            )
+        ranking = "🔥 **TOP OPORTUNIDADES**\n\n"
 
-            embed.add_field(name="🎯 SEÑAL", value=f"**{decision}**", inline=True)
-            embed.add_field(name="📊 SCORE", value=f"`{score}/5`", inline=True)
-            embed.add_field(name="💰 PRECIO", value=f"`${datos['precio']:,.2f}`", inline=True)
+        for i, (symbol, score, _) in enumerate(oportunidades[:5], start=1):
+            ranking += f"{i}️⃣ {symbol} — score {score}\n"
 
-            embed.add_field(name="📉 SOPORTE", value=f"`${datos['soporte']:,.2f}`", inline=True)
-            embed.add_field(name="📈 RESISTENCIA", value=f"`${datos['resistencia']:,.2f}`", inline=True)
-            embed.add_field(name="🌊 ESTRUCTURA", value=f"{datos['estructura']}", inline=True)
-
-            if decision != "🟡 ESPERAR":
-                embed.add_field(name="🛡️ STOP LOSS", value=f"`${sl:,.2f}`", inline=True)
-                embed.add_field(name="🚀 TAKE PROFIT", value=f"`${tp:,.2f}`", inline=True)
-                embed.add_field(name="📏 VOLATILIDAD (ATR)", value=f"`{datos['atr']:.4f}`", inline=True)
-
-            embed.add_field(
-                name="🤖 ANÁLISIS IA",
-                value=f"*{explicacion.strip()}*",
-                inline=False
-            )
-
-            await interaction.followup.send(embed=embed)
-
-        except Exception as e:
-            await interaction.followup.send(
-                f"❌ Error en el motor de análisis: {str(e)}"
-            )
+        await canal.send(ranking)
 
 
-# ============================
-# SETUP PARA MAIN.PY
-# ============================
+    # =====================
+    # SCAN MANUAL
+    # =====================
+
+    @discord.app_commands.command(name="scan", description="Escanea el mercado")
+    async def scan(self, interaction: discord.Interaction):
+
+        await interaction.response.defer()
+
+        resultados = []
+
+        for symbol in SCAN_SYMBOLS:
+
+            datos = self.obtener_datos(symbol)
+
+            if not datos:
+                continue
+
+            score = self.calcular_score(datos)
+
+            resultados.append((symbol, score, datos))
+
+        resultados.sort(key=lambda x: x[1], reverse=True)
+
+        texto = "📊 **Market Scan**\n\n"
+
+        for symbol, score, _ in resultados[:5]:
+            texto += f"• {symbol} → score {score}\n"
+
+        await interaction.followup.send(texto)
+
+
 async def setup(bot):
     await bot.add_cog(Trading(bot))
