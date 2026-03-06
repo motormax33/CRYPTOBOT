@@ -19,15 +19,15 @@ class MainBot(commands.Bot):
     async def setup_hook(self):
 
         # cargar cogs
-        await self.load_extension("stats")
-        await self.load_extension("trading")
-        await self.load_extension("limpieza")
-        await self.load_extension("alertas")
+        await self.load_extension("cogs.stats")
+        await self.load_extension("cogs.trading")
+        await self.load_extension("cogs.limpieza")
+        await self.load_extension("cogs.alertas")
 
         await self.tree.sync()
 
         print("✅ Cogs cargados")
-    
+
     async def on_ready(self):
         print(f"🤖 Bot conectado como {self.user}")
 
