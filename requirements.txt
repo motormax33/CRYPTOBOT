@@ -6,3 +6,4 @@ yfinance
 scipy
 flask
 telethon
+matplotlib
