@@ -7,3 +7,4 @@ scipy
 flask
 telethon
 matplotlib
+asyncio
