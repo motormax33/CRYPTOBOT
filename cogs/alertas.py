@@ -38,18 +38,26 @@ class Alertas(commands.Cog):
     async def ejecutar_telegram(self):
         print("📡 Conectando a Telegram...")
         await self.client.start()
+        print(f"✅ Telethon conectado correctamente.")
         print(
-            f"✅ Telethon conectado. Escuchando grupo {TELEGRAM_GROUP_ID} | Topic {TELEGRAM_TOPIC_ID}"
+            f"🎯 Escuchando grupo {TELEGRAM_GROUP_ID} | Topic {TELEGRAM_TOPIC_ID}"
         )
 
         # Handler para nuevos mensajes en el grupo de Telegram
         @self.client.on(events.NewMessage(chats=TELEGRAM_GROUP_ID))
         async def handler(event):
             msg = event.message
+
+            # LOG DE DEPURACIÓN: Esto nos ayudará a ver qué IDs está enviando Telegram
+            reply_to = getattr(msg, 'reply_to', None)
+            top_id = getattr(reply_to, 'reply_to_top_id', 'N/A')
+            msg_id = getattr(reply_to, 'reply_to_msg_id', 'N/A')
+            print(
+                f"🔍 Mensaje recibido - ID: {msg.id} | Top ID: {top_id} | Reply Msg ID: {msg_id}"
+            )
+
             if self.es_del_topic(msg):
-                print(
-                    f"📩 Nuevo mensaje detectado en el topic {TELEGRAM_TOPIC_ID}"
-                )
+                print(f"📩 ¡Mensaje del Topic detectado! Reenviando...")
                 await self.enviar_a_discord(msg)
 
         print("👂 Escuchando nuevos mensajes en tiempo real...")
@@ -62,20 +70,20 @@ class Alertas(commands.Cog):
         if isinstance(msg, MessageService):
             return False
 
-        # 1. Si el ID del mensaje es el ID del Topic (mensaje principal del hilo)
+        # 1. Si el ID del mensaje es el ID del Topic
         if msg.id == TELEGRAM_TOPIC_ID:
             return True
 
-        # 2. Si el mensaje es una respuesta a algo dentro del Topic
+        # 2. Si el mensaje es una respuesta
         if not msg.reply_to:
             return False
 
         r = msg.reply_to
-        # En grupos con temas (Topics), el 'reply_to_top_id' indica el ID del hilo principal
+        # En grupos con temas (Topics), el 'reply_to_top_id' es el ID del hilo
         top_id = getattr(r, "reply_to_top_id", None)
         msg_id = getattr(r, "reply_to_msg_id", None)
 
-        # Si el top_id o el msg_id coinciden con el ID del Topic, pertenece al hilo
+        # Verificamos contra el ID configurado
         if top_id == TELEGRAM_TOPIC_ID or msg_id == TELEGRAM_TOPIC_ID:
             return True
 
