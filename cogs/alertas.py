@@ -37,7 +37,7 @@ class Alertas(commands.Cog):
 
     async def ejecutar_telegram(self):
         print("📡 Conectando a Telegram...")
-        await self.client.start()
+        await self.client.connect()
         print(f"✅ Telethon conectado correctamente.")
         print(
             f"🎯 Escuchando grupo {TELEGRAM_GROUP_ID} | Topic {TELEGRAM_TOPIC_ID}"
@@ -138,3 +138,4 @@ class Alertas(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Alertas(bot))
+
