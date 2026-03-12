@@ -3,23 +3,9 @@ from discord.ext import commands
 import os
 from dotenv import load_dotenv
 import asyncio
-from flask import Flask
-from threading import Thread
 
 load_dotenv()
-
 TOKEN = os.getenv("DISCORD_TOKEN")
-
-# servidor web para Render
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot activo"
-
-
-def run_web():
-    app.run(host="0.0.0.0", port=10000)
 
 
 class MainBot(commands.Bot):
@@ -53,14 +39,9 @@ async def run_bot():
             async with bot:
                 await bot.start(TOKEN)
         except Exception as e:
-            print(f"⚠️ Bot detenido: {e}. Reiniciando en 10s")
+            print(f"⚠️ Bot detenido: {e}. Reiniciando en 10 segundos...")
             await asyncio.sleep(10)
 
 
 if __name__ == "__main__":
-
-    # iniciar servidor web
-    t = Thread(target=run_web)
-    t.start()
-
     asyncio.run(run_bot())
